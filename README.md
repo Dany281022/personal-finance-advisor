@@ -1,40 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+﻿# Personal Finance Advisor
 
-## Getting Started
+An AI-powered SaaS application that delivers personalized financial reports to young adults and self-employed workers who cannot afford a professional advisor.
 
-First, run the development server:
+## Screenshot
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+![Personal Finance Advisor](public/screenshot.png)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Live Demo
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+https://d3e3859j3271he.cloudfront.net
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+## Technology Stack
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+- **Frontend:** Next.js 16, TypeScript, Tailwind CSS, React Markdown
+- **Backend:** FastAPI, Python 3.12, Pydantic
+- **AI Model:** OpenAI GPT-4o-mini (Vercel), AWS Bedrock Nova 2 Lite (AWS)
+- **Authentication:** Clerk (JWT verification, subscription gating)
+- **Infrastructure:** AWS Lambda, API Gateway, S3, CloudFront, DynamoDB, Secrets Manager
+- **IaC:** Terraform
+- **CI/CD:** GitHub Actions with OIDC authentication
+- **Hosting:** Vercel (Part 1), AWS CloudFront (Parts 2-4)
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Architecture Overview
 
-## Learn More
+User Browser (HTTPS) → Clerk (Auth) → Next.js Frontend (Vercel / S3 + CloudFront) → API Gateway → AWS Lambda (FastAPI via Mangum) → AWS Bedrock (Nova 2 Lite) / DynamoDB / Secrets Manager
 
-To learn more about Next.js, take a look at the following resources:
+Terraform manages all AWS resources. GitHub Actions triggers on push to master — packages Lambda, runs terraform apply, builds frontend, syncs to S3, and invalidates CloudFront.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+## Local Development Setup
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+git clone https://github.com/Dany281022/personal-finance-advisor.git
+cd personal-finance-advisor
+npm install
+pip install -r requirements.txt
 
-## Deploy on Vercel
+Create .env.local with:
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+CLERK_JWKS_URL=https://YOUR-APP.clerk.accounts.dev/.well-known/jwks.json
+OPENAI_API_KEY=sk-...
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Run locally: vercel dev
+## Deployment
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+**Terraform:** From the infra/ directory, run terraform init, terraform workspace select dev, then terraform apply. This provisions Lambda, API Gateway, S3, CloudFront, DynamoDB, and Secrets Manager in one command.
+
+**GitHub Actions:** Push to master triggers the full pipeline automatically — Lambda packaging with Linux x86_64 binaries, Terraform apply, Next.js build, S3 sync, and CloudFront invalidation. Authentication uses OIDC so no long-lived AWS keys are stored.
+
+## API Endpoints
+
+GET /health — Returns {"status": "healthy", "version": "1.0"}
+
+POST /api — Generates a personalized financial report. Requires a valid Clerk JWT and an active premium_subscription plan.
+
+Request body: monthly_income (float), monthly_expenses (float), total_debt (float), savings_goal (float), savings_deadline (string YYYY-MM-DD), situation_description (string 20-1000 chars)
+
+Response (Vercel): Server-Sent Events stream with __NL__ encoded newlines.
+Response (AWS): {"response": "...", "session_id": "user_id"}
+
+## Known Limitations
+
+1. **No real-time streaming on AWS:** The Lambda deployment uses the non-streaming converse() call, so the full response loads at once. This would be resolved by implementing converse_stream() with a StreamingResponse.
+
+2. **Single-turn analysis only:** Each form submission is an independent request. DynamoDB stores session history but the frontend does not yet send a session_id to resume previous conversations.
+
+## Future Improvements
+
+1. **Real-time Bedrock streaming** — Replace converse() with converse_stream() to stream tokens progressively to the browser, eliminating the wait time on the AWS deployment.
+
+2. **Monthly progress tracking** — Add a dashboard showing all past financial reports per user, allowing them to compare their budget surplus, debt, and savings progress month over month.
