@@ -3,11 +3,6 @@ terraform {
   required_providers {
     aws = { source = "hashicorp/aws", version = "~> 5.0" }
   }
-  backend "s3" {
-    bucket = "personal-finance-advisor-tfstate-352956325292"
-    key    = "dev/terraform.tfstate"
-    region = "us-east-2"
-  }
 }
 
 provider "aws" {
@@ -15,7 +10,7 @@ provider "aws" {
 }
 
 data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
+data "aws_region"          "current" {}
 
 locals {
   name_prefix  = "${var.project_name}-${terraform.workspace}"

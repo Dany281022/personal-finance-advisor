@@ -32,9 +32,9 @@ export default function Home() {
 
         <div className="text-center py-20">
           <h2 className="text-6xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-6">
-            Know Exactly Where
+            Take Control of
             <br />
-            Your Money Goes
+            Your Financial Future
           </h2>
           <p className="text-xl text-gray-600 dark:text-gray-400 mb-12 max-w-2xl mx-auto">
             Get a personalized budget analysis, a step-by-step savings plan, and a clear risk report — in seconds, based on your actual numbers.
