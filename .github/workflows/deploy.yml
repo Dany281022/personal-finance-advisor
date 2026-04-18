@@ -1,0 +1,109 @@
+name: Deploy Personal Finance Advisor
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, prod]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.DEFAULT_AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python dependencies and package Lambda
+        run: |
+          pip install -r requirements.txt -t ./package \
+            --platform manylinux2014_x86_64 \
+            --only-binary=:all: \
+            --python-version 3.12 \
+            --quiet
+          cp *.py package/
+          cd package
+          zip -r ../infra/lambda.zip . --quiet
+          cd ..
+          rm -rf package
+          echo "Lambda packaged: $(ls -lh infra/lambda.zip)"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: infra
+        run: terraform init
+
+      - name: Select Terraform workspace
+        working-directory: infra
+        run: |
+          terraform workspace select dev || terraform workspace new dev
+
+      - name: Terraform Apply
+        working-directory: infra
+        run: terraform apply -auto-approve
+
+      - name: Get Terraform outputs
+        working-directory: infra
+        id: tf_outputs
+        run: |
+          echo "api_url=$(terraform output -raw api_gateway_url)" >> $GITHUB_OUTPUT
+          echo "cf_domain=$(terraform output -raw cloudfront_domain)" >> $GITHUB_OUTPUT
+          echo "frontend_bucket=$(terraform output -raw frontend_bucket)" >> $GITHUB_OUTPUT
+          echo "cf_distribution=$(aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='$(terraform output -raw cloudfront_domain)'].Id" --output text)" >> $GITHUB_OUTPUT
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build Next.js frontend
+        env:
+          NEXT_PUBLIC_API_URL: ${{ steps.tf_outputs.outputs.api_url }}/api
+        run: npm run build
+
+      - name: Sync frontend to S3
+        run: |
+          aws s3 sync out/ s3://${{ steps.tf_outputs.outputs.frontend_bucket }}/ \
+            --delete \
+            --region ${{ secrets.DEFAULT_AWS_REGION }}
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.tf_outputs.outputs.cf_distribution }} \
+            --paths "/*"
+
+      - name: Deployment summary
+        run: |
+          echo "Deployment complete!"
+          echo "CloudFront URL: https://${{ steps.tf_outputs.outputs.cf_domain }}"
+          echo "API URL: ${{ steps.tf_outputs.outputs.api_url }}"
+          
