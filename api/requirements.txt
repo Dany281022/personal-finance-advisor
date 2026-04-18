@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+openai
+python-multipart
+fastapi-clerk-auth
+pydantic[email]
