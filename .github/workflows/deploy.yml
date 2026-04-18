@@ -87,6 +87,8 @@ jobs:
       - name: Build Next.js frontend
         env:
           NEXT_PUBLIC_API_URL: ${{ steps.tf_outputs.outputs.api_url }}/api
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
         run: npm run build
 
       - name: Sync frontend to S3
