@@ -1,5 +1,4 @@
 name: Deploy Personal Finance Advisor
-
 on:
   push:
     branches: [master]
@@ -11,11 +10,9 @@ on:
         default: 'dev'
         type: choice
         options: [dev, prod]
-
 permissions:
   id-token: write
   contents: read
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -61,7 +58,11 @@ jobs:
 
       - name: Terraform Init
         working-directory: infra
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=personal-finance-advisor-tfstate-352956325292" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=us-east-2"
 
       - name: Select Terraform workspace
         working-directory: infra
