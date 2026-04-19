@@ -53,20 +53,20 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.6.0
+          terraform_version: 1.9.0
           terraform_wrapper: false
 
       - name: Terraform Init
         working-directory: infra
         env:
           TF_CLI_ARGS: "-no-color"
+          CHECKPOINT_DISABLE: "1"
         run: |
-          wget -O- https://apt.releases.hashicorp.com/gpg | \
-            sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
           terraform init \
             -backend-config="bucket=personal-finance-advisor-tfstate-352956325292" \
             -backend-config="key=dev/terraform.tfstate" \
-            -backend-config="region=us-east-2"
+            -backend-config="region=us-east-2" \
+            -lockfile=readonly
 
       - name: Select Terraform workspace
         working-directory: infra
