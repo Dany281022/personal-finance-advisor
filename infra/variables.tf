@@ -1,13 +1,13 @@
 variable "aws_region" {
   description = "AWS region for all resources"
   type        = string
-  default     = "us-east-2"
+  default     = "us-east-1"
 }
 
 variable "project_name" {
-  description = "Short name used as a prefix for all resource names"
+  description = "Short name used as a prefix for all resource names (lowercase, hyphens only)"
   type        = string
-  default     = "personal-finance-advisor"
+  default     = "myapp"
 }
 
 variable "environment" {
@@ -17,9 +17,9 @@ variable "environment" {
 }
 
 variable "bedrock_model_id" {
-  description = "Bedrock model ID"
+  description = "Bedrock model ID. Use the global. cross-region inference prefix for best availability."
   type        = string
-  default     = "amazon.nova-lite-v1:0"
+  default     = "global.amazon.nova-2-lite-v1:0"
 }
 
 variable "lambda_timeout" {
@@ -29,7 +29,13 @@ variable "lambda_timeout" {
 }
 
 variable "clerk_jwks_url" {
-  description = "Clerk JWKS URL for JWT verification"
+  description = "Clerk JWKS URL for JWT verification (not secret — safe to store in tfvars)"
   type        = string
   default     = ""
+}
+
+variable "alert_email" {
+  description = "Email address for CloudWatch alarm notifications"
+  type        = string
+  default     = "ddeugoue@mycambrian.ca"
 }

@@ -1,23 +1,19 @@
 import os
 import boto3
 from fastapi import FastAPI, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from typing import Optional
 from fastapi_clerk_auth import ClerkConfig, ClerkHTTPBearer, HTTPAuthorizationCredentials
 from mangum import Mangum
 from dynamo_memory import load_conversation, save_conversation
-from aws_secrets import get_secret
 
 app = FastAPI()
 
 USE_DYNAMODB = os.getenv("USE_DYNAMODB", "false").lower() == "true"
 
-if USE_DYNAMODB:
-    config = get_secret(os.getenv("SECRET_NAME", "personal-finance-advisor/config-dev"))
-    cors_origins = config.get("CORS_ORIGINS", "http://localhost:3000").split(",")
-else:
-    cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,7 +34,6 @@ class InputRecord(BaseModel):
     savings_goal: float = Field(gt=0)
     savings_deadline: str
     situation_description: str = Field(min_length=20, max_length=1000)
-    session_id: str = None
 
 
 system_prompt = """
@@ -93,9 +88,9 @@ Your AI Finance Advisor
 IMPORTANT RULES:
 - Always produce all three sections in the exact order above.
 - Each section MUST be preceded by a blank line, then the ## heading.
-- The header block must have NO extra blank lines between fields.
+- The header block (Monthly Income through Savings Deadline) must have NO extra blank lines between fields.
 - Savings Plan steps MUST be numbered and each MUST include a priority level.
-- The report MUST always end with the exact sign-off.
+- The report MUST always end with the exact sign-off: "Best regards," on one line, then "Your AI Finance Advisor" on the next line.
 - Do NOT wrap the output in a code block.
 - Do NOT add any introductory sentence or commentary before the report.
 - Do NOT add any closing sentence or commentary after the sign-off.
@@ -126,23 +121,35 @@ def health_check():
     return {"status": "healthy", "version": "1.0"}
 
 
+@app.get("/conversation/{session_id}")
+def get_conversation(
+    session_id: str,
+    creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
+):
+    # Only the authenticated user can access their own conversation history.
+    user_id = creds.decoded["sub"]
+    if USE_DYNAMODB:
+        messages = load_conversation(session_id)
+    else:
+        messages = []
+    return {"session_id": session_id, "messages": messages, "count": len(messages)}
+
+
 @app.post("/api")
 def process(
     record: InputRecord,
     creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
 ):
     user_id = creds.decoded["sub"]
-    session_id = record.session_id if record.session_id else user_id
-
-    conversation = load_conversation(session_id) if USE_DYNAMODB else []
+    session_id = user_id
 
     bedrock = boto3.client(
         service_name="bedrock-runtime",
-        region_name=os.getenv("BEDROCK_REGION", "us-east-2")
+        region_name=os.getenv("BEDROCK_REGION", "us-east-1")
     )
 
-    response = bedrock.converse(
-        modelId=os.getenv("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0"),
+    response = bedrock.converse_stream(
+        modelId=os.getenv("BEDROCK_MODEL_ID", "global.amazon.nova-2-lite-v1:0"),
         system=[{"text": system_prompt}],
         messages=[
             {
@@ -152,17 +159,34 @@ def process(
         ]
     )
 
-    assistant_response = response["output"]["message"]["content"][0]["text"]
+    full_response = []
 
-    conversation.append({"role": "user", "content": user_prompt_for(record)})
-    conversation.append({"role": "assistant", "content": assistant_response})
-    if USE_DYNAMODB:
-        save_conversation(session_id, conversation)
+    def event_stream():
+        try:
+            stream = response.get("stream")
+            if stream:
+                for event in stream:
+                    if "contentBlockDelta" in event:
+                        delta = event["contentBlockDelta"].get("delta", {})
+                        text = delta.get("text", "")
+                        if text:
+                            full_response.append(text)
+                            encoded = text.replace("\r\n", "\n").replace("\r", "\n")
+                            encoded = encoded.replace("\n", "__NL__")
+                            yield f"data: {encoded}\n\n"
 
-    return JSONResponse(content={
-        "response": assistant_response,
-        "session_id": session_id
-    })
+            if USE_DYNAMODB:
+                assistant_response = "".join(full_response)
+                conversation = load_conversation(session_id)
+                conversation.append({"role": "user", "content": user_prompt_for(record)})
+                conversation.append({"role": "assistant", "content": assistant_response})
+                save_conversation(session_id, conversation)
+
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: Error during streaming: {str(e)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 handler = Mangum(app)

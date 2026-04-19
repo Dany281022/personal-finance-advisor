@@ -1,9 +1,10 @@
 "use client"
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { Protect, PricingTable, UserButton } from '@clerk/nextjs';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
@@ -17,9 +18,15 @@ function FinanceAdvisorForm() {
   const [savingsGoal, setSavingsGoal] = useState('');
   const [savingsDeadline, setSavingsDeadline] = useState('');
   const [situationDescription, setSituationDescription] = useState('');
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('finance_session_id');
+    if (stored) setSessionId(stored);
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -33,31 +40,48 @@ function FinanceAdvisorForm() {
       return;
     }
 
-    try {
-      const res = await fetch(`${API_URL}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify({
-          monthly_income: parseFloat(monthlyIncome),
-          monthly_expenses: parseFloat(monthlyExpenses),
-          total_debt: parseFloat(totalDebt),
-          savings_goal: parseFloat(savingsGoal),
-          savings_deadline: savingsDeadline,
-          situation_description: situationDescription,
-        }),
-      });
+    const controller = new AbortController();
+    let buffer = '';
 
-      const data = await res.json();
-      setOutput(data.response || 'No response received');
-    } catch (err) {
-      console.error('Error:', err);
-      setOutput('An error occurred. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    await fetchEventSource(`${API_URL}`, {
+      signal: controller.signal,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({
+        monthly_income: parseFloat(monthlyIncome),
+        monthly_expenses: parseFloat(monthlyExpenses),
+        total_debt: parseFloat(totalDebt),
+        savings_goal: parseFloat(savingsGoal),
+        savings_deadline: savingsDeadline,
+        situation_description: situationDescription,
+      }),
+      openWhenHidden: true,
+      onmessage(ev) {
+        if (ev.data === '[DONE]') {
+          controller.abort();
+          setLoading(false);
+          if (sessionId) {
+            localStorage.setItem('finance_session_id', sessionId);
+          }
+          return;
+        }
+        const decoded = ev.data.replace(/__NL__/g, '\n');
+        buffer += decoded;
+        setOutput(buffer);
+      },
+      onclose() {
+        setLoading(false);
+      },
+      onerror(err) {
+        console.error('SSE error:', err);
+        controller.abort();
+        setLoading(false);
+        throw err;
+      },
+    });
   }
 
   return (
