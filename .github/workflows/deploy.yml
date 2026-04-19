@@ -58,7 +58,11 @@ jobs:
 
       - name: Terraform Init
         working-directory: infra
+        env:
+          TF_CLI_ARGS: "-no-color"
         run: |
+          wget -O- https://apt.releases.hashicorp.com/gpg | \
+            sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
           terraform init \
             -backend-config="bucket=personal-finance-advisor-tfstate-352956325292" \
             -backend-config="key=dev/terraform.tfstate" \
